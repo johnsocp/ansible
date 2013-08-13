@@ -69,6 +69,20 @@ options:
     description:
      - Files to insert into the instance. remotefilename:localcontent
     default: null
+  public_nic:
+    description: 
+     - adds a public interface if True
+    default: "True"
+    choices: ["True", "False"]
+  private_nic:
+    description: 
+     - adds a private interface if True
+    default: "True"
+    choices: ["True", "False"]
+  private_network:
+    description:
+     - UUID of an existing private cloud network (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+    default: null 
   region:
     description:
      - Region to create an instance in
@@ -102,6 +116,8 @@ EXAMPLES = '''
      name: rax-test1
      flavor: 5
      image: b11d9567-e412-4255-96b9-bd63ab23bcfe
+     public_interface: False
+     private_network: 1ea2ac91-5792-432f-80f0-77d407b0231a
      files:
         /root/.ssh/authorized_keys: /home/localuser/.ssh/id_rsa.pub
         /root/test.txt: /home/localuser/test.txt
@@ -125,7 +141,8 @@ except ImportError:
 SUPPORTEDSERVICES = ['cloudservers']
 
 def cloudservers(module, state, name, flavor, image, meta, key_name, files,
-                 wait, wait_timeout):
+                 wait, wait_timeout, public_interface=True, private_interface=True, 
+                 private_network):
     # Check our args (this could be done better)
     for arg in (state, name, flavor, image):
         if not arg:
@@ -159,6 +176,20 @@ def cloudservers(module, state, name, flavor, image, meta, key_name, files,
                 except Exception, e:
                     module.fail_json(msg = 'Failed to load %s' % lpath)
             try:
+              if private_network:
+                cnw = pyrax.cloud_networks
+                network = cnw.get(private_network)
+                networks = network.get_server_networks(public=public_interface, 
+                                                       private=private_interface)
+                servers = [pyrax.cloudservers.servers.create(name=name,
+                                                             image=image,
+                                                             flavor=flavor,
+                                                             key_name=key_name,
+                                                             meta=meta,
+                                                             files=files,
+                                                             nics=networks)]
+                changed = True
+              else: 
                 servers = [pyrax.cloudservers.servers.create(name=name,
                                                              image=image,
                                                              flavor=flavor,
@@ -231,6 +262,9 @@ def main():
             region = dict(),
             wait = dict(type='bool', choices=BOOLEANS),
             wait_timeout = dict(default=300),
+            private_interface = dict(type='bool', choices=['True', 'False']),
+            public_interface = dict(type='bool', choices=['True', 'False']),
+            private_network=dict(type='dict', default={}),
         )
     )
 
@@ -248,6 +282,9 @@ def main():
     region = module.params.get('region')
     wait = module.params.get('wait')
     wait_timeout = int(module.params.get('wait_timeout'))
+    private_interface = module.params.get('private_interface')
+    public_interface = module.params.get('public_interface')
+    private_network = module.params.get('private_network')
 
     # Setup the credentials and region
     try:
@@ -276,7 +313,7 @@ def main():
     # Act based on service
     if service == 'cloudservers':
         cloudservers(module, state, name, flavor, image, meta, key_name, files,
-                     wait, wait_timeout)
+                     wait, wait_timeout, public_interface, private_interface, private_network)
     elif service in ['cloudfiles', 'cloud_blockstorage',
                      'cloud_databases', 'cloud_loadbalancers']:
         module.fail_json(msg = 'Service %s is not supported at this time' %
